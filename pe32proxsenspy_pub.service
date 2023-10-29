@@ -1,0 +1,21 @@
+[Unit]
+Description=PE32 proximity sensor exporter
+After=network.target
+
+[Service]
+Type=simple
+#Environment=PE32PROXSENS_BROKER=test.mosquitto.org
+#Environment=PE32PROXSENS_TOPIC=myhome/infra/power/xwwwform
+#Environment=PE32PROXSENS_GUID=EUI48:11:22:33:44:55:66
+#Environment=PE32PROXSENS_DEBUG=1
+Environment=GPIO=22
+EnvironmentFile=-/etc/default/pe32proxsenspy_pub
+RestartSec=15
+Restart=always
+ExecStart=/usr/bin/python3 /srv/pe32proxsenspy_pub/pe32proxsenspy_pub.py $GPIO
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+# vim: set syn=dosini:
