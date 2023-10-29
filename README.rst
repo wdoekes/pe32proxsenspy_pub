@@ -4,6 +4,20 @@ pe32proxsenspy_pub
 **Project Energy 32:** *Read water meter (FIXME brand), through
 a proximity sensor (FIXME brand), export water usage using MQTT.*
 
+----
+TODO
+----
+
+* Fewer syscalls, more waiting (see below).
+
+* Fix images/setup/howto here.
+
+* Detect MQTT send misconfiguration? Right now we saw multiple pushes
+  being stuck (multiple tasks hanging at mqtt publish?).
+
+
+*Fewer syscalls*
+
 The basis for this is the following code. Ideally we'd like to do fewer
 syscalls (longer epoll_wait) than we do now. For another day.
 

@@ -10,6 +10,8 @@ from contextlib import AsyncExitStack
 from asyncio_mqtt import Client as MqttClient
 from RPi import GPIO
 
+from litergauge import LiterGauge
+
 
 APP_START_TM = int(time.time() * 1000)
 
@@ -50,14 +52,15 @@ class Pe32ProxSensPublisher:
         self._mqttc = MqttClient(self._mqtt_broker)
         return self._mqttc
 
-    async def publish(self, absolute, relative):
-        log.info(f'publish: {absolute} {relative}')
+    async def publish(self, absolute, relative, speed):
+        log.info(f'publish: {absolute} {relative} {speed}')
 
         tm = int(time.time() * 1000) - APP_START_TM
         mqtt_string = (
             f'device_id={self._guid}&'
             f'w_absolute_l={absolute}&'
             f'w_relative_l={relative}&'
+            f'w_speed_mlps={speed}&'
             f'dbg_uptime={tm}&'
             f'dbg_version={__version__}').encode('ascii')
 
@@ -69,21 +72,33 @@ class Pe32ProxSensPublisher:
 class ProximitySensorProcessor:
     def __init__(self, publisher):
         self._liters = 0
+        self._litergauge = LiterGauge()
         self._publisher = publisher
-        self._last_sane_value = int(time.time() * 1000)  # start valid
+        self._last_pulse = self._last_activity = int(time.time() * 1000)
 
     def ms_since_last_value(self):
-        return int(time.time() * 1000 - self._last_sane_value)
+        return int(time.time() * 1000 - self._last_pulse)
 
     def pulse(self):
         self._liters += 1
-        self._last_sane_value = int(time.time() * 1000)
+        self._last_pulse = last_activity = int(time.time() * 1000)
+
+        self._litergauge.set_liters(last_activity, self._liters)
+
+        loop = asyncio.get_event_loop()
+        loop.call_soon(asyncio.create_task, self.publish_pulse())
+
+    def no_pulse(self):
+        last_activity = int(time.time() * 1000)
+
+        self._litergauge.set_liters(last_activity, self._liters)
 
         loop = asyncio.get_event_loop()
         loop.call_soon(asyncio.create_task, self.publish_pulse())
 
     async def publish_pulse(self):
-        await self._publisher.publish(-1, self._liters)
+        await self._publisher.publish(
+            -1, self._liters, self._litergauge.get_milliliters_per_second())
 
 
 class ProximitySensorClient:
@@ -110,7 +125,10 @@ class ProximitySensorClient:
         # Not this in asyncio yet...?
         # > if GPIO.wait_for_edge(self._gpio_pin, GPIO.RISING,
         # >   timeout=self.LONG_TIMEOUT_MS) is None:
+
         old_value = await self.get_stable_value()
+        old_time = time.time()
+
         while True:
             new_value = GPIO.input(self._gpio_pin)
             if new_value != old_value:
@@ -127,9 +145,16 @@ class ProximitySensorClient:
 
             await asyncio.sleep(self.LONG_TIMEOUT)
 
+            new_time = time.time()
+            if new_time - old_time >= 60:
+                self._processor.no_pulse()
+                old_time = new_time
+
     async def get_stable_value(self):
         values = []
+
         while True:
+            await asyncio.sleep(self.SHORT_TIMEOUT)
             values.append(GPIO.input(self._gpio_pin))
 
             if len(values) >= self.PULSE_CONFIRM_COUNT:
@@ -138,8 +163,6 @@ class ProximitySensorClient:
 
             if len(values) >= 100:
                 raise ValueError('bouncing values', values)
-
-            await asyncio.sleep(self.SHORT_TIMEOUT)
 
 
 async def main(proxsens_gpio_pin, publisher_class=Pe32ProxSensPublisher):
