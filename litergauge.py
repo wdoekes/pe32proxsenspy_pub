@@ -38,32 +38,51 @@ class LiterGauge:
             self._recalculate()
             return
 
-        # No change?
-        if current_l == self._p[2]:
-            # It had a flow of 0? Keep 0
-            if self._liters_per_ms == 0.0:
-                return
+        # New values? Lets gooo!
+        if current_l != self._p[2]:
+            self._t.append(time_ms)
+            self._p.append(current_l)
+            self._t.pop(0)  # tests with python3.10 say append+pop is ..
+            self._p.pop(0)  # .. cheaper than doing x,y,z=a,b,c transform
 
-            # Was the previous interval larger than the new time? Set 0
-            last_t_per_p = (
-                (self._t[2] - self._t[1]) / (self._p[2] - self._p[1]))
-            new_t_for_no_p = (time_ms - self._t[2])
-            if new_t_for_no_p > (last_t_per_p * 2):
-                self._liters_per_ms = 0.0
-                return
-
-            # Decrease flow rate
-            self._liters_per_ms = (
-                (self._p[2] - self._p[1]) / (time_ms - self._t[1]))
+            self._recalculate()
             return
 
-        # New values
-        self._t.append(time_ms)
-        self._p.append(current_l)
-        self._t.pop(0)  # tests with python3.10 say append+pop is ..
-        self._p.pop(0)  # .. cheaper than doing x,y,z=a,b,c transform
+        # Unchanged litre count.
 
-        self._recalculate()
+        # It already had a flow of 0? Keep 0.
+        if self._liters_per_ms == 0.0:
+            return
+
+        # Compare flows.
+        last_flow = (
+            (self._p[2] - self._p[0]) / (self._t[2] - self._t[0]))
+        last_last_flow = (
+            (self._p[2] - self._p[1]) / (self._t[2] - self._t[1]))
+
+        if last_last_flow > (1.1 * last_flow):
+            # >10% flow increase? Use only latest.
+            last_flow = last_last_flow
+            t_prev = self._t[1]
+            p_prev = self._p[1]
+        else:
+            # Use both times for better averages.
+            t_prev = self._t[0]
+            p_prev = self._p[0]
+
+        # Would we have expected another increase by now? If so,
+        # then the flow has likely been turned off.
+        hypothetical_flow = (current_l - p_prev) / (time_ms - t_prev)
+        assert hypothetical_flow <= last_flow, (
+            self._t, self._p, time_ms, hypothetical_flow, last_flow)
+
+        if hypothetical_flow >= (0.5 * last_flow):
+            # Hypothetical flow 50% of the previous flow or more,
+            # keep, for now.
+            pass
+        else:
+            # Set it to zero. Likely the faucet has been turned off.
+            self._liters_per_ms = 0.0
 
     def _recalculate(self):
         # print('t=', self._t, ';p=', self._p)
