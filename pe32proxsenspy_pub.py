@@ -74,11 +74,18 @@ class Pe32ProxSensPublisher:
 
 
 class ProximitySensorProcessor:
+    MIN_PUBLISH_MS = 300000  # at least once every 5 minutes
+
     def __init__(self, publisher):
         self._liters = 0
         self._litergauge = LiterGauge()
         self._publisher = publisher
         self._last_pulse = millis()
+
+        self._published_absolute_liters = None
+        self._published_relative_liters = None
+        self._published_flow = None
+        self._published_time = millis()
 
     def ms_since_last_value(self):
         return millis() - self._last_pulse
@@ -94,12 +101,24 @@ class ProximitySensorProcessor:
     def _update(self):
         self._litergauge.set_liters(millis(), self._liters)
 
-        loop = asyncio.get_event_loop()
-        loop.call_soon(asyncio.create_task, self.publish_pulse())
+        absolute_liters = -1
+        relative_liters = self._liters
+        flow = self._litergauge.get_milliliters_per_second()
 
-    async def publish_pulse(self):
-        await self._publisher.publish(
-            -1, self._liters, self._litergauge.get_milliliters_per_second())
+        if (absolute_liters != self._published_absolute_liters or
+                relative_liters != self._published_relative_liters or
+                flow != self._published_flow or
+                (millis() - self._published_time) >= self.MIN_PUBLISH_MS):
+            self._published_absolute_liters = absolute_liters
+            self._published_relative_liters = relative_liters
+            self._published_flow = flow
+            self._published_time = millis()
+
+            # Schedule for execution in someone elses time.
+            loop = asyncio.get_event_loop()
+            loop.call_soon(
+                asyncio.create_task, self._publisher.publish(
+                    absolute_liters, relative_liters, flow))
 
 
 class GpioProximitySensorInterpreter(DigitalPulseInterpreter):
