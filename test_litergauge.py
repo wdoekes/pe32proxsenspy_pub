@@ -1,13 +1,13 @@
-import unittest
+from unittest import TestCase
 
 from litergauge import LiterGauge
 
 
-class LiterGaugeTestCase(unittest.TestCase):
+class LiterGaugeTest(TestCase):
     def test_litergauge(self):
         inputs = (
             # At t = 0
-            ("10:10:00.000", 0, 0), 
+            ("10:10:00.000", 0, 0),
             ("10:11:00.000", 0, 0),
             ("10:12:00.000", 0, 0),
             # +1

@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 import asyncio
-import logging
-import os
-import sys
-import time
 
 from contextlib import AsyncExitStack
+from logging import getLogger
+from os import environ, getpid
+from time import time
 
 from asyncio_mqtt import Client as MqttClient
 from RPi import GPIO
 
 from litergauge import LiterGauge
+from pulseint import DigitalPulseInterpreter
 
 
-APP_START_TM = int(time.time() * 1000)
+__version__ = 'pe32proxsenspy_pub-FIXME'
+
+log = getLogger()
+
+
+def millis():
+    return int(time() * 1000)
+
+
+APP_START_TM = millis()
 
 
 class DeadMansSwitchTripped(Exception):
@@ -30,19 +39,14 @@ async def dead_mans_switch(processor):
         await asyncio.sleep(1)
 
 
-__version__ = 'pe32proxsenspy_pub-FIXME'
-
-log = logging.getLogger()
-
-
 class Pe32ProxSensPublisher:
     def __init__(self):
-        self._mqtt_broker = os.environ.get(
+        self._mqtt_broker = environ.get(
             'PE32PROXSENS_BROKER', 'test.mosquitto.org')
-        self._mqtt_topic = os.environ.get(
+        self._mqtt_topic = environ.get(
             'PE32PROXSENS_TOPIC', 'myhome/infra/water/xwwwform')
         self._mqttc = None
-        self._guid = os.environ.get(
+        self._guid = environ.get(
             'PE32PROXSENS_GUID', 'EUI48:11:22:33:44:55:66')
 
     def open(self):
@@ -55,12 +59,12 @@ class Pe32ProxSensPublisher:
     async def publish(self, absolute, relative, speed):
         log.info(f'publish: {absolute} {relative} {speed}')
 
-        tm = int(time.time() * 1000) - APP_START_TM
+        tm = millis() - APP_START_TM
         mqtt_string = (
             f'device_id={self._guid}&'
             f'w_absolute_l={absolute}&'
             f'w_relative_l={relative}&'
-            f'w_speed_mlps={speed}&'
+            f'w_speed_mlps={speed}&'  # FIXME: speed->flow?
             f'dbg_uptime={tm}&'
             f'dbg_version={__version__}').encode('ascii')
 
@@ -74,24 +78,21 @@ class ProximitySensorProcessor:
         self._liters = 0
         self._litergauge = LiterGauge()
         self._publisher = publisher
-        self._last_pulse = self._last_activity = int(time.time() * 1000)
+        self._last_pulse = millis()
 
     def ms_since_last_value(self):
-        return int(time.time() * 1000 - self._last_pulse)
+        return millis() - self._last_pulse
 
     def pulse(self):
         self._liters += 1
-        self._last_pulse = last_activity = int(time.time() * 1000)
-
-        self._litergauge.set_liters(last_activity, self._liters)
-
-        loop = asyncio.get_event_loop()
-        loop.call_soon(asyncio.create_task, self.publish_pulse())
+        self._last_pulse = millis()
+        self._update()
 
     def no_pulse(self):
-        last_activity = int(time.time() * 1000)
+        self._update()
 
-        self._litergauge.set_liters(last_activity, self._liters)
+    def _update(self):
+        self._litergauge.set_liters(millis(), self._liters)
 
         loop = asyncio.get_event_loop()
         loop.call_soon(asyncio.create_task, self.publish_pulse())
@@ -101,14 +102,17 @@ class ProximitySensorProcessor:
             -1, self._liters, self._litergauge.get_milliliters_per_second())
 
 
-class ProximitySensorClient:
-    LONG_TIMEOUT = 0.100        # normal sleep
-    SHORT_TIMEOUT = 0.010       # the short one for bounce avoidance
-    PULSE_CONFIRM_COUNT = 3     # pulse confirmed after 3 (extra) good readings
+class GpioProximitySensorInterpreter(DigitalPulseInterpreter):
+    """
+    GPIO interface to LJ12A3-4-Z/BX
 
-    def __init__(self, gpio_pin, processor):
+    NPN-NO (Normally Open, light on when metals er detected, LOW sensing wire)
+
+    "This switch has a low response frequency but a good stability."
+    """
+    def __init__(self, gpio_pin, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self._gpio_pin = gpio_pin
-        self._processor = processor
 
     async def open(self):
         log.info(GPIO.RPI_INFO)
@@ -118,51 +122,14 @@ class ProximitySensorClient:
         GPIO.setup(self._gpio_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
     def close(self):
-        log.debug('(ProximitySensorClient.close)')
+        log.debug('(GpioProximitySensorInterpreter.close)')
         GPIO.cleanup()
 
-    async def run(self):
+    def digital_read(self):
         # Not this in asyncio yet...?
         # > if GPIO.wait_for_edge(self._gpio_pin, GPIO.RISING,
         # >   timeout=self.LONG_TIMEOUT_MS) is None:
-
-        old_value = await self.get_stable_value()
-        old_time = time.time()
-
-        while True:
-            new_value = GPIO.input(self._gpio_pin)
-            if new_value != old_value:
-                checked_value = await self.get_stable_value()
-
-                if checked_value == new_value:
-                    log.debug(f'new value, changing to {checked_value}')
-                    if checked_value == GPIO.LOW:
-                        self._processor.pulse()
-                    old_value = checked_value
-
-                else:
-                    log.debug(f'absorbed jitter, keeping {checked_value}')
-
-            await asyncio.sleep(self.LONG_TIMEOUT)
-
-            new_time = time.time()
-            if new_time - old_time >= 60:
-                self._processor.no_pulse()
-                old_time = new_time
-
-    async def get_stable_value(self):
-        values = []
-
-        while True:
-            await asyncio.sleep(self.SHORT_TIMEOUT)
-            values.append(GPIO.input(self._gpio_pin))
-
-            if len(values) >= self.PULSE_CONFIRM_COUNT:
-                if len(set(values[:-self.PULSE_CONFIRM_COUNT])) == 1:
-                    return values[-1]
-
-            if len(values) >= 100:
-                raise ValueError('bouncing values', values)
+        return GPIO.input(self._gpio_pin) == GPIO.LOW
 
 
 async def main(proxsens_gpio_pin, publisher_class=Pe32ProxSensPublisher):
@@ -190,9 +157,11 @@ async def main(proxsens_gpio_pin, publisher_class=Pe32ProxSensPublisher):
 
         processor = ProximitySensorProcessor(publisher)
 
-        # Create ProximitySensorProcessor client, open connection and push
+        # Create signal interpreter, open connection and push
         # shutdown code.
-        proxsens_client = ProximitySensorClient(proxsens_gpio_pin, processor)
+        proxsens_client = GpioProximitySensorInterpreter(
+            gpio_pin=proxsens_gpio_pin,
+            on_pulse=processor.pulse, on_no_pulse=processor.no_pulse)
         await proxsens_client.open()
         stack.callback(proxsens_client.close)  # synchronous!
 
@@ -213,17 +182,19 @@ async def main(proxsens_gpio_pin, publisher_class=Pe32ProxSensPublisher):
 
 
 if __name__ == '__main__':
+    import logging
+    import sys
+
     called_from_cli = (
         # Reading just JOURNAL_STREAM or INVOCATION_ID will not tell us
         # whether a user is looking at this, or whether output is passed to
         # systemd directly.
-        any(os.isatty(i.fileno())
-            for i in (sys.stdin, sys.stdout, sys.stderr)) or
-        not os.environ.get('JOURNAL_STREAM'))
+        any(fp.isatty() for fp in (sys.stdin, sys.stdout, sys.stderr)) or
+        not environ.get('JOURNAL_STREAM'))
     sys.stdout.reconfigure(line_buffering=True)  # PYTHONUNBUFFERED, but better
     logging.basicConfig(
         level=(
-            logging.DEBUG if os.environ.get('PE32PROXSENS_DEBUG', '')
+            logging.DEBUG if environ.get('PE32PROXSENS_DEBUG', '')
             else logging.INFO),
         format=(
             '%(asctime)s %(message)s' if called_from_cli
@@ -231,7 +202,7 @@ if __name__ == '__main__':
         stream=sys.stdout,
         datefmt='%Y-%m-%d %H:%M:%S')
 
-    print(f"pid {os.getpid()}: send SIGINT or SIGTERM to exit.")
+    print(f"pid {getpid()}: send SIGINT or SIGTERM to exit.")
     loop = asyncio.get_event_loop()
     proxsens_gpio_pin = int(sys.argv[1])  # XXX: fixme, parse "GPIO6->22
     main_coro = main(proxsens_gpio_pin, publisher_class=Pe32ProxSensPublisher)
