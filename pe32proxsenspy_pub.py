@@ -6,11 +6,12 @@ from logging import getLogger
 from os import environ, getpid
 from time import time
 
-from asyncio_mqtt import Client as MqttClient
 from RPi import GPIO
+from asyncio_mqtt import Client as MqttClient
+from smbus import SMBus
 
 from litergauge import LiterGauge
-from pulseint import DigitalPulseInterpreter
+from pulseint import AnalogPulseInterpreter, DigitalPulseInterpreter
 
 
 __version__ = 'pe32proxsenspy_pub-FIXME'
@@ -165,6 +166,97 @@ class GpioProximitySensorInterpreter(DigitalPulseInterpreter):
         return GPIO.input(self._gpio_pin) == GPIO.LOW
 
 
+class ADS1115ConfigReg:
+    __fields__ = (
+        # 15    = Operational status or single-shot conversion start
+        ('conversion', 1, 0b1),
+        # 14:12 = Input multiplexer configuration (ADS1115 only)
+        #         100 : AINP = AIN0 and AINN = GND
+        ('mux', 3, 0b100),
+        # 11:9  = Programmable gain amplifier configuration
+        #         001 : FSR = +/-4.096 V
+        ('pga', 3, 0b001),
+        # 8     = Device operating mode
+        #         0 : continuous (vs. one-shot / low power)
+        ('mode', 1, 0b0),
+        # 7:5   = Data rate
+        #         100 : 128 SPS (default), samples/second?
+        ('dr', 3, 0b100),
+        # 4     = Comparator mode (ADS1114 and ADS1115 only)
+        #         0 : Traditional comparator (default)
+        ('comp_mode', 1, 0b0),
+        # 3     = Comparator polarity (ADS1114 and ADS1115 only)
+        #         0 : Active low (default)
+        ('comp_pol', 1, 0b0),
+        # 2     = Latching comparator (ADS1114 and ADS1115 only)
+        #         0 : Nonlatching comparator (default)
+        ('comp_latch', 1, 0b0),
+        # 1:0   = Comparator queue and disable (ADS1114 and ADS1115 only)
+        #         11 : Disable comparator (default)
+        ('comp_que', 2, 0b11),
+    )
+
+    def __init__(self, **kwargs):
+        for name, bits, default in self.__fields__:
+            setattr(self, name, default)
+
+    def from_int(self, total):
+        for name, bits, default in reversed(self.__fields__):
+            bitmask = (1 << bits) - 1
+            value = total & bitmask
+            setattr(self, name, value)
+            total >>= bits
+
+    def as_int(self):
+        total = 0
+        for name, bits, default in self.__fields__:
+            total <<= bits
+            bitmask = (1 << bits) - 1
+            value = getattr(self, name) & bitmask
+            total |= value
+        return total
+
+    def as_bytes(self):
+        value = self.as_int()
+        return [value >> 8, value & 0xFF]
+
+
+class AnalogHallsensorInterpreter(AnalogPulseInterpreter):
+    """
+    I2C interface to ADS1115 (ADC) backed by SS49/AH49 Hall sensor
+
+    FIXME: document config needed to get i2c up and running on RPi
+    """
+    # We can change address to 0x49, 0x4A and 0x4B by hooking the
+    # address pin to (VDD/)SDA/SCL/GND.
+    ADS1115_ADDRESS = 0x48
+
+    def __init__(self, i2c_dev, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._i2c_dev = i2c_dev  # 1 means '/dev/i2c-1'
+
+    async def open(self):
+        self._bus = SMBus(self._i2c_dev)
+
+        # Select configuration register: 0x01
+        reg = ADS1115ConfigReg()
+        reg.comparator = 0b100  # select AINP = AIN0 and AINN = GND
+        reg.pga = 0b001         # select +/-4.096 V
+        self._bus.write_i2c_block_data(
+            self.ADS1115_ADDRESS, 0x01, reg.as_bytes())
+
+    def close(self):
+        log.debug('(AnalogHallsensorInterpreter.close)')
+
+    def analog_read(self):
+        # Read value: 0x00
+        data = self._bus.read_i2c_block_data(self.ADS1115_ADDRESS, 0x00, 2)
+        raw_adc = data[0] << 8 | data[1]
+        if raw_adc > 32767:
+            raw_adc -= 65535
+        return raw_adc
+
+
 async def main(proxsens_gpio_pin, publisher_class=Pe32ProxSensPublisher):
     async def cancel_tasks(tasks):
         log.debug(f'Checking tasks {tasks!r}')
@@ -192,9 +284,14 @@ async def main(proxsens_gpio_pin, publisher_class=Pe32ProxSensPublisher):
 
         # Create signal interpreter, open connection and push
         # shutdown code.
-        proxsens_client = GpioProximitySensorInterpreter(
-            gpio_pin=proxsens_gpio_pin,
-            on_pulse=processor.pulse, on_no_pulse=processor.no_pulse)
+        if proxsens_gpio_pin == 1:
+            proxsens_client = AnalogHallsensorInterpreter(
+                i2c_dev=proxsens_gpio_pin,
+                on_pulse=processor.pulse, on_no_pulse=processor.no_pulse)
+        else:
+            proxsens_client = GpioProximitySensorInterpreter(
+                gpio_pin=proxsens_gpio_pin,
+                on_pulse=processor.pulse, on_no_pulse=processor.no_pulse)
         await proxsens_client.open()
         stack.callback(proxsens_client.close)  # synchronous!
 

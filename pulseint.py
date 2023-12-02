@@ -10,6 +10,142 @@ class DigitalPulseReadError(ValueError):
     pass
 
 
+class AnalogCalibrator:
+    MIN_DIFF = 500  # we get 16-bit values..
+
+    def __init__(self, low=16500, high=18500):
+        self._many_values = []
+        self.low, self.high = low, high
+        self.med1, self.med2 = None, None
+
+        if self.low and self.high:
+            self.calculate()
+
+    def feed(self, value):
+        self._many_values.append(value)
+
+        if len(self._many_values) >= 800:
+            self.calibrate()
+            self._many_values = []
+
+    def calibrate(self):
+        # order values, and truncate 5% from each side
+        vals = list(sorted(self._many_values))
+        p5 = len(vals) // 20
+        assert p5 > 1, (p5, vals)
+        vals = vals[p5:-p5]
+        low, high = vals[0], vals[-1]
+
+        # first time only
+        if self.low is None:
+            self.low = low
+        if self.high is None:
+            self.high = max(high, low + self.MIN_DIFF)
+
+        # we must be able to correct ourselves, so we make low
+        # slightly less low and high slightly less high
+        if (self.high - self.low - 1) > self.MIN_DIFF:
+            self.high -= 1
+        if (self.high - self.low - 1) > self.MIN_DIFF:
+            self.low += 1
+
+        # take the new values
+        if low < self.low:
+            self.low = low
+        if high > self.high:
+            self.high = high
+
+        self.calculate()
+
+    def calculate(self):
+        diff = (self.high - self.low)
+        self.med1 = self.low + diff // 3
+        self.med2 = self.high - diff // 3
+
+
+class AnalogCalibratingPulseParser:
+    def __init__(self, low=None, high=None):
+        kwargs = {}
+        if low is not None:
+            kwargs['low'] = low
+        if high is not None:
+            kwargs['high'] = high
+
+        self.calibrator = AnalogCalibrator(**kwargs)
+        self._was_above = None
+        self.high_pulse = None
+
+    def feed(self, value):
+        self.high_pulse = None
+        self.calibrator.feed(value)
+
+        # initial
+        if self._was_above is None:
+            if self.calibrator.med1 is not None:
+                if value < self.calibrator.med1:
+                    self._was_above = False
+                elif value > self.calibrator.med2:
+                    self._was_above = True
+            return
+
+        if self._was_above is False:
+            if value > self.calibrator.med2:
+                self._was_above = True
+                self.high_pulse = True
+        elif self._was_above is True:
+            if value < self.calibrator.med1:
+                self._was_above = False
+                self.high_pulse = False
+
+
+class AnalogPulseInterpreter:
+    """
+    FIXME: documentation about expected range..
+    """
+    SLEEP_BETWEEN_READINGS = 0.1
+
+    def __init__(self, on_pulse, on_no_pulse):
+        self._parser = AnalogCalibratingPulseParser(low=16500, high=18500)
+        self.on_pulse = on_pulse
+        self.on_no_pulse = on_no_pulse
+
+    async def run(self):
+        # Collect a bunch of readings a while so we can debug this. Do this one
+        # minute every hour.
+        t0 = time()
+        dbg_show = False
+        dbg_coll = []
+
+        while True:
+            value = self.analog_read()
+            self._parser.feed(value)
+
+            if (time() - t0) % 3600 < 60:
+                dbg_coll.append(value)
+                if len(dbg_coll) >= 20:
+                    dbg_show = True
+            elif dbg_coll:
+                dbg_show = True
+
+            if dbg_show:
+                values = ', '.join(str(v) for v in dbg_coll)
+                dbg_coll.clear()
+                dbg_show = False
+                log.debug(f'Analog readings: {values}')
+
+            if self._parser.high_pulse is True:
+                low = self._parser.calibrator.low
+                high = self._parser.calibrator.high
+                log.debug(f'got (high) pulse {value} [{low}..{high}]')
+                self.on_pulse()
+            elif self._parser.high_pulse is False:
+                low = self._parser.calibrator.low
+                high = self._parser.calibrator.high
+                log.debug(f'got (low) pulse {value} [{low}..{high}]')
+                # self.on_pulse()
+            await sleep(self.SLEEP_BETWEEN_READINGS)
+
+
 class DigitalPulseInterpreter:
     """
     FIXME: documentation about expected range..
