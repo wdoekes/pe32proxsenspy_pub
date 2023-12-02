@@ -41,7 +41,9 @@ async def dead_mans_switch(processor):
 
 
 class Pe32ProxSensPublisher:
-    def __init__(self):
+    def __init__(self, prefix):
+        self._prefix = prefix  # 'w_' (water) or 'g_' (gas)
+
         self._mqtt_broker = environ.get(
             'PE32PROXSENS_BROKER', 'test.mosquitto.org')
         self._mqtt_topic = environ.get(
@@ -57,15 +59,15 @@ class Pe32ProxSensPublisher:
         self._mqttc = MqttClient(self._mqtt_broker)
         return self._mqttc
 
-    async def publish(self, absolute, relative, speed):
-        log.info(f'publish: {absolute} {relative} {speed}')
+    async def publish(self, absolute, relative, flow):
+        log.info(f'publish: {absolute} {relative} {flow}')
 
         tm = millis() - APP_START_TM
         mqtt_string = (
             f'device_id={self._guid}&'
-            f'w_absolute_l={absolute}&'
-            f'w_relative_l={relative}&'
-            f'w_speed_mlps={speed}&'  # FIXME: speed->flow?
+            f'{self._prefix}absolute_l={absolute}&'
+            f'{self._prefix}relative_l={relative}&'
+            f'{self._prefix}flow_mlps={flow}&'
             f'dbg_uptime={tm}&'
             f'dbg_version={__version__}').encode('ascii')
 
@@ -81,10 +83,11 @@ class Pe32ProxSensPublisher:
 class ProximitySensorProcessor:
     MIN_PUBLISH_MS = 300000  # at least once every 5 minutes
 
-    def __init__(self, publisher):
+    def __init__(self, publisher, liters_per_pulse=1):
         self._liters = 0
         self._litergauge = LiterGauge()
         self._publisher = publisher
+        self._liters_per_pulse = liters_per_pulse
         self._last_pulse = millis()
 
         self._published_absolute_liters = None
@@ -96,7 +99,7 @@ class ProximitySensorProcessor:
         return millis() - self._last_pulse
 
     def pulse(self):
-        self._liters += 1
+        self._liters += self._liters_per_pulse
         self._last_pulse = millis()
         self._update()
 
@@ -277,10 +280,17 @@ async def main(proxsens_gpio_pin, publisher_class=Pe32ProxSensPublisher):
         tasks = set()
         stack.push_async_callback(cancel_tasks, tasks)
 
-        publisher = publisher_class()
+        if proxsens_gpio_pin == 1:
+            publisher = publisher_class('g_')  # gas
+        else:
+            publisher = publisher_class('w_')  # water
         await stack.enter_async_context(publisher.open())
 
-        processor = ProximitySensorProcessor(publisher)
+        if proxsens_gpio_pin == 1:
+            processor = ProximitySensorProcessor(
+                publisher, liters_per_pulse=10)
+        else:
+            processor = ProximitySensorProcessor(publisher)
 
         # Create signal interpreter, open connection and push
         # shutdown code.
