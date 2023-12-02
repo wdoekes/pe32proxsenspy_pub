@@ -68,7 +68,11 @@ class Pe32ProxSensPublisher:
             f'dbg_uptime={tm}&'
             f'dbg_version={__version__}').encode('ascii')
 
-        await self._mqttc.publish(self._mqtt_topic, payload=mqtt_string)
+        try:
+            await self._mqttc.publish(self._mqtt_topic, payload=mqtt_string)
+        except Exception as e:
+            log.error(f'Got error during publish of {mqtt_string}: {e}')
+            exit(1)
 
         log.debug(f'Published: {mqtt_string}')
 
@@ -116,6 +120,16 @@ class ProximitySensorProcessor:
 
             # Schedule for execution in someone elses time.
             loop = asyncio.get_event_loop()
+            # PROBLEM: If the connection is broken, we get a
+            # asyncio_mqtt.error.MqttCodeError from publish().
+            # ... which is unhandled.
+            # > loop.call_soon() is specifically meant to be used for
+            # > callbacks, which usually are very simple functions used to hook
+            # > into events (job done, exception was raised in future, etc.),
+            # > and they are not expected to cooperate.
+            # This should not be done with call_soon. Instead we should have a
+            # different continuous task that waits for an event and then does
+            # the publish(). Here we should just poke that publish.
             loop.call_soon(
                 asyncio.create_task, self._publisher.publish(
                     absolute_liters, relative_liters, flow))
@@ -125,7 +139,7 @@ class GpioProximitySensorInterpreter(DigitalPulseInterpreter):
     """
     GPIO interface to LJ12A3-4-Z/BX
 
-    NPN-NO (Normally Open, light on when metals er detected, LOW sensing wire)
+    NPN-NO (Normally Open, sens wire LOW (light on) when metals are detected)
 
     "This switch has a low response frequency but a good stability."
     """
