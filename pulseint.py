@@ -115,10 +115,13 @@ class AnalogPulseInterpreter:
         t0 = time()
         dbg_show = False
         dbg_coll = []
+        prev_low, prev_high = None, None
 
         while True:
             value = self.analog_read()
             self._parser.feed(value)
+            low = self._parser.calibrator.low
+            high = self._parser.calibrator.high
 
             if (time() - t0) % 3600 < 60:
                 dbg_coll.append(value)
@@ -134,15 +137,18 @@ class AnalogPulseInterpreter:
                 log.debug(f'Analog readings: {values}')
 
             if self._parser.high_pulse is True:
-                low = self._parser.calibrator.low
-                high = self._parser.calibrator.high
                 log.debug(f'got (high) pulse {value} [{low}..{high}]')
                 self.on_pulse()
             elif self._parser.high_pulse is False:
-                low = self._parser.calibrator.low
-                high = self._parser.calibrator.high
                 log.debug(f'got (low) pulse {value} [{low}..{high}]')
                 # self.on_pulse()
+
+            if low != prev_low or high != prev_high:
+                log.debug(
+                    f'recalibrated: {prev_low}->{low} {prev_high}->{high}')
+                prev_low = low
+                prev_high = high
+
             await sleep(self.SLEEP_BETWEEN_READINGS)
 
 
