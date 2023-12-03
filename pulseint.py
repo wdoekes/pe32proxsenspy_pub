@@ -132,7 +132,7 @@ class AnalogPulseInterpreter:
                 dbg_show = True
 
             if dbg_show:
-                values = ', '.join(str(v) for v in dbg_coll)
+                values = ' '.join(str(v) for v in dbg_coll)
                 dbg_coll.clear()
                 dbg_show = False
                 log.debug(f'Analog readings: {values}')
@@ -191,7 +191,7 @@ class DigitalPulseInterpreter:
                 checked_value = await self.get_stable_value()
 
                 if checked_value == new_value:
-                    log.debug(f'new value, changing to {checked_value}')
+                    # log.debug(f'new value, changing to {checked_value}')
                     if checked_value:
                         self.on_pulse()
                         pulse_time = time()

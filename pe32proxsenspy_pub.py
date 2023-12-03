@@ -60,7 +60,7 @@ class Pe32ProxSensPublisher:
         return self._mqttc
 
     async def publish(self, absolute, relative, flow):
-        log.info(f'publish: {absolute} {relative} {flow}')
+        # log.info(f'publish: {absolute} {relative} {flow}')
 
         tm = millis() - APP_START_TM
         mqtt_string = (
@@ -69,15 +69,16 @@ class Pe32ProxSensPublisher:
             f'{self._prefix}relative_l={relative}&'
             f'{self._prefix}flow_mlps={flow}&'
             f'dbg_uptime={tm}&'
-            f'dbg_version={__version__}').encode('ascii')
+            f'dbg_version={__version__}')
 
         try:
-            await self._mqttc.publish(self._mqtt_topic, payload=mqtt_string)
+            await self._mqttc.publish(
+                self._mqtt_topic, payload=mqtt_string.encode('ascii'))
         except Exception as e:
             log.error(f'Got error during publish of {mqtt_string}: {e}')
             exit(1)
 
-        log.debug(f'Published: {mqtt_string}')
+        log.debug(f'Published: {mqtt_string.replace("&", " ")}')
 
 
 class ProximitySensorProcessor:
