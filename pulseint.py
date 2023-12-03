@@ -117,14 +117,16 @@ class AnalogPulseInterpreter:
         dbg_coll = []
         prev_low, prev_high = None, None
         thigh = None
+        expect_next_pulse = None
 
         while True:
+            now = time()
             value = self.analog_read()
             self._parser.feed(value)
             low = self._parser.calibrator.low
             high = self._parser.calibrator.high
 
-            if (time() - t0) % 3600 < 60:
+            if (now - t0) % 3600 < 60:
                 dbg_coll.append(value)
                 if len(dbg_coll) >= 20:
                     dbg_show = True
@@ -148,9 +150,15 @@ class AnalogPulseInterpreter:
                 # the med1/med2 values from the calibrator.)
                 if thigh is not None:
                     # 11% of 10,000mL = 1100 -> 1100/dT (mL/s)
-                    flow_mlps = 1100 / (time() - thigh)
+                    now = time()
+                    td = now - thigh
+                    flow_mlps = 1100 / td
+                    # Expect next pulse at td/0.11 (td*9), but give it
+                    # some space, so we want it at least at td*12.
+                    expect_next_pulse = now + (td * 12)
                 else:
                     flow_mlps = None
+                    expect_next_pulse = None
 
                 log.debug(
                     f'got (low) pulse {value} [{low}..{high}] '
@@ -162,6 +170,11 @@ class AnalogPulseInterpreter:
                     f'recalibrated: {prev_low}->{low} {prev_high}->{high}')
                 prev_low = low
                 prev_high = high
+
+            if expect_next_pulse and expect_next_pulse >= now:
+                self.on_no_pulse()
+                # Send a pulse every half hour
+                expect_next_pulse = (now + 1800)
 
             await sleep(self.SLEEP_BETWEEN_READINGS)
 
