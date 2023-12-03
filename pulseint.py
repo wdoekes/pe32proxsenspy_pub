@@ -116,6 +116,7 @@ class AnalogPulseInterpreter:
         dbg_show = False
         dbg_coll = []
         prev_low, prev_high = None, None
+        thigh = None
 
         while True:
             value = self.analog_read()
@@ -137,11 +138,24 @@ class AnalogPulseInterpreter:
                 log.debug(f'Analog readings: {values}')
 
             if self._parser.high_pulse is True:
+                thigh = time()
                 log.debug(f'got (high) pulse {value} [{low}..{high}]')
-                self.on_pulse()
-            elif self._parser.high_pulse is False:
-                log.debug(f'got (low) pulse {value} [{low}..{high}]')
                 # self.on_pulse()
+            elif self._parser.high_pulse is False:
+                # The pulse is on 1 digit of 10, so the duration of one
+                # pulse will give us an approximation of flow rate.
+                # We've measured it to be about 11%. (This depends on
+                # the med1/med2 values from the calibrator.)
+                if thigh is not None:
+                    # 11% of 10,000mL = 1100 -> 1100/dT (mL/s)
+                    flow_mlps = 1100 / (time() - thigh)
+                else:
+                    flow_mlps = None
+
+                log.debug(
+                    f'got (low) pulse {value} [{low}..{high}] '
+                    f'{flow_mlps} (mL/s)')
+                self.on_pulse(estimated_flow_mlps=flow_mlps)
 
             if low != prev_low or high != prev_high:
                 log.debug(

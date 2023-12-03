@@ -85,6 +85,7 @@ class ProximitySensorProcessor:
 
     def __init__(self, publisher, liters_per_pulse=1):
         self._liters = 0
+        self._estimated_flow_mlps = None
         self._litergauge = LiterGauge()
         self._publisher = publisher
         self._liters_per_pulse = liters_per_pulse
@@ -98,12 +99,14 @@ class ProximitySensorProcessor:
     def ms_since_last_value(self):
         return millis() - self._last_pulse
 
-    def pulse(self):
+    def pulse(self, estimated_flow_mlps=None):
         self._liters += self._liters_per_pulse
+        self._estimated_flow_mlps = estimated_flow_mlps
         self._last_pulse = millis()
         self._update()
 
     def no_pulse(self):
+        self._estimated_flow_mlps = None
         self._update()
 
     def _update(self):
@@ -112,6 +115,9 @@ class ProximitySensorProcessor:
         absolute_liters = -1
         relative_liters = self._liters
         flow = self._litergauge.get_milliliters_per_second()
+
+        if self._estimated_flow_mlps is not None:
+            flow = max(self._estimated_flow_mlps, flow)
 
         if (absolute_liters != self._published_absolute_liters or
                 relative_liters != self._published_relative_liters or
