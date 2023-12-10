@@ -84,10 +84,10 @@ class Pe32ProxSensPublisher:
 class ProximitySensorProcessor:
     MIN_PUBLISH_MS = 300000  # at least once every 5 minutes
 
-    def __init__(self, publisher, liters_per_pulse=1):
+    def __init__(self, publisher, gauge, liters_per_pulse=1):
         self._liters = 0
         self._estimated_flow_mlps = None
-        self._litergauge = LiterGauge()
+        self._litergauge = gauge
         self._publisher = publisher
         self._liters_per_pulse = liters_per_pulse
         self._last_pulse = millis()
@@ -107,20 +107,24 @@ class ProximitySensorProcessor:
         self._update()
 
     def no_pulse(self):
-        self._estimated_flow_mlps = None
+        self._estimated_flow_mlps = 0
         self._update()
 
     def _update(self):
-        self._litergauge.set_liters(millis(), self._liters)
-
         absolute_liters = -1
         relative_liters = self._liters
-        flow = self._litergauge.get_milliliters_per_second()
+        flow = self._estimated_flow_mlps
 
-        if self._estimated_flow_mlps is not None:
-            flow = max(self._estimated_flow_mlps, flow)
+        if self._litergauge:
+            self._litergauge.set_liters(millis(), self._liters)
+            calc_flow = self._litergauge.get_milliliters_per_second()
+            if flow is None:
+                flow = calc_flow
+            else:
+                flow = max(calc_flow, flow)
 
-        if (absolute_liters != self._published_absolute_liters or
+        if flow is not None and (
+                absolute_liters != self._published_absolute_liters or
                 relative_liters != self._published_relative_liters or
                 flow != self._published_flow or
                 (millis() - self._published_time) >= self.MIN_PUBLISH_MS):
@@ -295,9 +299,10 @@ async def main(proxsens_gpio_pin, publisher_class=Pe32ProxSensPublisher):
 
         if proxsens_gpio_pin == 1:
             processor = ProximitySensorProcessor(
-                publisher, liters_per_pulse=10)
+                publisher, gauge=None, liters_per_pulse=10)
         else:
-            processor = ProximitySensorProcessor(publisher)
+            processor = ProximitySensorProcessor(
+                publisher, gauge=LiterGauge())
 
         # Create signal interpreter, open connection and push
         # shutdown code.

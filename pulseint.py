@@ -152,29 +152,33 @@ class AnalogPulseInterpreter:
                     # 11% of 10,000mL = 1100 -> 1100/dT (mL/s)
                     now = time()
                     td = now - thigh
-                    flow_mlps = 1100 / td
+                    flow_mlps = int(1100 / td + 0.5)
                     # Expect next pulse at td/0.11 (td*9), but give it
                     # some space, so we want it at least at td*12.
                     expect_next_pulse = now + (td * 12)
                 else:
+                    td = None
                     flow_mlps = None
                     expect_next_pulse = None
 
                 log.debug(
                     f'got (low) pulse {value} [{low}..{high}] '
-                    f'{flow_mlps} (mL/s)')
+                    f'{flow_mlps} (mL/s) now={now} next={expect_next_pulse} '
+                    f'td={td}')
                 self.on_pulse(estimated_flow_mlps=flow_mlps)
 
             if low != prev_low or high != prev_high:
                 log.debug(
-                    f'recalibrated: {prev_low}->{low} {prev_high}->{high}')
+                    f'recalibrated: {prev_low}->{low} {prev_high}->{high} '
+                    f'({value})')
                 prev_low = low
                 prev_high = high
 
-            if expect_next_pulse and expect_next_pulse >= now:
+            if expect_next_pulse and now >= expect_next_pulse:
                 self.on_no_pulse()
-                # Send a pulse every half hour
-                expect_next_pulse = (now + 1800)
+                # Send a (no gas usage) pulse every minute.
+                expect_next_pulse = (now + 60)
+                log.debug(f'sent no_pulse, next={expect_next_pulse}')
 
             await sleep(self.SLEEP_BETWEEN_READINGS)
 
