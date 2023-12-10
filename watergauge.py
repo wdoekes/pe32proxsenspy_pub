@@ -1,4 +1,4 @@
-class LiterGauge:
+class WaterGauge:
     """
     prod = WattGauge()
     prod.set_liters(millis(), current_liters)
@@ -24,7 +24,7 @@ class LiterGauge:
         return int(self._liters_per_ms * 1000000)
 
     def set_liters(self, time_ms, current_l):
-        "Feed data to the LiterGauge: do this often"
+        "Feed data to the WaterGauge: do this often"
         try:
             self._p[2]
         except IndexError:

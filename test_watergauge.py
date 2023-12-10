@@ -1,10 +1,10 @@
 from unittest import TestCase
 
-from litergauge import LiterGauge
+from watergauge import WaterGauge
 
 
-class LiterGaugeTest(TestCase):
-    def test_litergauge(self):
+class WaterGaugeTest(TestCase):
+    def test_watergauge(self):
         inputs = (
             # At t = 0
             ("10:10:00.000", 0, 0),
@@ -37,7 +37,7 @@ class LiterGaugeTest(TestCase):
             ("10:20:20.000", 16, 400),
             ("10:20:30.000", 16, 0),
         )
-        gauge = LiterGauge()
+        gauge = WaterGauge()
         for tmstr, relative, flow in inputs:
             h, m, s = tmstr.split(':', 2)
             s, ms = s.split('.')
@@ -52,7 +52,7 @@ class LiterGaugeTest(TestCase):
                 f'got unexpected {calculated_flow} at '
                 f'("{tmstr}", {relative}, {flow})'))
 
-    def test_litergauge_live(self):
+    def test_watergauge_live(self):
         inputs = (
             ('22:50:14.000', 244, 0),
             ('22:51:14.000', 244, 0),
@@ -113,7 +113,7 @@ class LiterGaugeTest(TestCase):
             ('23:08:14.000', 281, 0),
             ('23:09:14.000', 281, 0),
         )
-        gauge = LiterGauge()
+        gauge = WaterGauge()
         for tmstr, relative, flow in inputs:
             h, m, s = tmstr.split(':', 2)
             s, ms = s.split('.')

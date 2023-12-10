@@ -10,8 +10,8 @@ from RPi import GPIO
 from asyncio_mqtt import Client as MqttClient
 from smbus import SMBus
 
-from litergauge import LiterGauge
 from pulseint import AnalogPulseInterpreter, DigitalPulseInterpreter
+from watergauge import WaterGauge
 
 
 __version__ = 'pe32proxsenspy_pub-FIXME'
@@ -87,7 +87,7 @@ class ProximitySensorProcessor:
     def __init__(self, publisher, gauge, liters_per_pulse=1):
         self._liters = 0
         self._estimated_flow_mlps = None
-        self._litergauge = gauge
+        self._gauge = gauge
         self._publisher = publisher
         self._liters_per_pulse = liters_per_pulse
         self._last_pulse = millis()
@@ -115,9 +115,9 @@ class ProximitySensorProcessor:
         relative_liters = self._liters
         flow = self._estimated_flow_mlps
 
-        if self._litergauge:
-            self._litergauge.set_liters(millis(), self._liters)
-            calc_flow = self._litergauge.get_milliliters_per_second()
+        if self._gauge:
+            self._gauge.set_liters(millis(), self._liters)
+            calc_flow = self._gauge.get_milliliters_per_second()
             if flow is None:
                 flow = calc_flow
             else:
@@ -302,7 +302,7 @@ async def main(proxsens_gpio_pin, publisher_class=Pe32ProxSensPublisher):
                 publisher, gauge=None, liters_per_pulse=10)
         else:
             processor = ProximitySensorProcessor(
-                publisher, gauge=LiterGauge())
+                publisher, gauge=WaterGauge())
 
         # Create signal interpreter, open connection and push
         # shutdown code.
