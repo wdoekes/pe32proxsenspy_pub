@@ -240,6 +240,12 @@ class AnalogHallsensorInterpreter(AnalogPulseInterpreter):
     I2C interface to ADS1115 (ADC) backed by SS49/AH49 Hall sensor
 
     FIXME: document config needed to get i2c up and running on RPi
+
+    FIXME: don't forget "modprobe i2c-dev"
+    (see also: i2cdetect -F 1)
+
+    # enable i2c
+    dtparam=i2c1=on
     """
     # We can change address to 0x49, 0x4A and 0x4B by hooking the
     # address pin to (VDD/)SDA/SCL/GND.

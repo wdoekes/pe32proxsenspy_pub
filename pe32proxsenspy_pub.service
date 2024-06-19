@@ -1,5 +1,5 @@
 [Unit]
-Description=PE32 proximity sensor exporter
+Description=PE32 proximity sensor exporter used to read a water meter with an inductive rotating metal plate (LJ12A3-4-Z/BX), or a gas meter with a pulse magnet in the last drum (SS49E)
 After=network.target
 
 [Service]

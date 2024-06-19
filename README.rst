@@ -1,8 +1,16 @@
 pe32proxsenspy_pub
 ==================
 
-**Project Energy 32:** *Read water meter (FIXME brand), through
-a proximity sensor (FIXME brand), export water usage using MQTT.*
+**Project Energy 32:** *Read analog water meter or analog gas meter pulses
+using inductive sensors, export water and gas usage using MQTT.*
+
+The water sensor component uses a digital proximity sensor (LJ12A3-4-Z/BX) that
+detects metallic proximity over a distance of at most 4mm.
+
+The gas sensor component uses an analog *hall sensor* (SS49E) that ...
+
+... alternatives at e.g. https://github.com/gizmocuz/esp_proximity_sensor_mqtt
+
 
 ----
 TODO
