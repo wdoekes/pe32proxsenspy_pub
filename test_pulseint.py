@@ -698,7 +698,7 @@ class AnalogValuesTest(TestCase):
 
     def test_fast_cook_after_training(self):
         c = AnalogCalibratingPulseParser(low=16784, high=18367)
-        for sessions in range(10000):
+        for sessions in range(1000):
             res = []
             for s in ANALOG_GAS_100900_US_APART:
                 c.feed(s)

@@ -11,22 +11,38 @@ class DigitalPulseReadError(ValueError):
 
 
 class AnalogCalibrator:
-    MIN_DIFF = 500  # we get 16-bit values..
+    MIN_DIFF = 800  # we get 16-bit values..
 
     def __init__(self, low=16500, high=18500):
-        self._many_values = []
+        self._reset()
         self.low, self.high = low, high
         self.med1, self.med2 = None, None
 
         if self.low and self.high:
             self.calculate()
+            log.debug(f'initial calibration: [{self.get_current_values()}]')
 
     def feed(self, value):
         self._many_values.append(value)
 
-        if len(self._many_values) >= 800:
-            self.calibrate()
-            self._many_values = []
+        if len(self._many_values) >= 8000:
+            if self._pulses >= 5:
+                self.calibrate()
+                self._reset()
+            else:
+                self._many_values.pop(0)
+
+    def counted_pulse(self):
+        self._pulses += 1
+
+    def _reset(self):
+        self._many_values = []
+        self._pulses = 0
+
+    def get_current_values(self):
+        return (
+            f'{self.low}<{self.med1}<<{self.med2}<{self.high}'
+            f'(pls={self._pulses},vls={len(self._many_values)})')
 
     def calibrate(self):
         # order values, and truncate 5% from each side
@@ -56,6 +72,8 @@ class AnalogCalibrator:
             self.high = high
 
         self.calculate()
+        log.debug(
+            f'followup calibration: [{self.get_current_values()}]')
 
     def calculate(self):
         diff = (self.high - self.low)
@@ -105,7 +123,7 @@ class AnalogPulseInterpreter:
     SLEEP_BETWEEN_READINGS = 0.1
 
     def __init__(self, on_pulse, on_no_pulse):
-        self._parser = AnalogCalibratingPulseParser(low=16500, high=18500)
+        self._parser = AnalogCalibratingPulseParser(low=17500, high=20000)
         self.on_pulse = on_pulse
         self.on_no_pulse = on_no_pulse
 
@@ -115,7 +133,6 @@ class AnalogPulseInterpreter:
         t0 = time()
         dbg_show = False
         dbg_coll = []
-        prev_low, prev_high = None, None
         thigh = None
         expect_next_pulse = None
 
@@ -123,8 +140,7 @@ class AnalogPulseInterpreter:
             now = time()
             value = self.analog_read()
             self._parser.feed(value)
-            low = self._parser.calibrator.low
-            high = self._parser.calibrator.high
+            sensor_info = self._parser.calibrator.get_current_values()
 
             if (now - t0) % 3600 < 60:
                 dbg_coll.append(value)
@@ -141,7 +157,8 @@ class AnalogPulseInterpreter:
 
             if self._parser.high_pulse is True:
                 thigh = time()
-                log.debug(f'got (high) pulse {value} [{low}..{high}]')
+                log.debug(f'got (high) pulse {value} [{sensor_info}]')
+                expect_next_pulse = None
                 # self.on_pulse()
             elif self._parser.high_pulse is False:
                 # The pulse is on 1 digit of 10, so the duration of one
@@ -161,24 +178,23 @@ class AnalogPulseInterpreter:
                     flow_mlps = None
                     expect_next_pulse = None
 
+                self._parser.calibrator.counted_pulse()
+                pulses = self._parser.calibrator._pulses
+
                 log.debug(
-                    f'got (low) pulse {value} [{low}..{high}] '
+                    f'got (low, #{pulses}) pulse {value} [{sensor_info}] '
                     f'{flow_mlps} (mL/s) now={now} next={expect_next_pulse} '
                     f'td={td}')
-                self.on_pulse(estimated_flow_mlps=flow_mlps)
+                self.on_pulse(
+                    estimated_flow_mlps=flow_mlps, sensor_info=sensor_info)
 
-            if low != prev_low or high != prev_high:
-                log.debug(
-                    f'recalibrated: {prev_low}->{low} {prev_high}->{high} '
-                    f'({value})')
-                prev_low = low
-                prev_high = high
-
-            if expect_next_pulse and now >= expect_next_pulse:
-                self.on_no_pulse()
+            if not expect_next_pulse or now >= expect_next_pulse:
+                self.on_no_pulse(sensor_info=sensor_info)
                 # Send a (no gas usage) pulse every minute.
                 expect_next_pulse = (now + 60)
-                log.debug(f'sent no_pulse, next={expect_next_pulse}')
+                log.debug(
+                    f'sent no_pulse, next={expect_next_pulse}, '
+                    f'value={value} [{sensor_info}]')
 
             await sleep(self.SLEEP_BETWEEN_READINGS)
 

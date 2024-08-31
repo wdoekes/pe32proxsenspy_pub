@@ -59,7 +59,7 @@ class Pe32ProxSensPublisher:
         self._mqttc = MqttClient(self._mqtt_broker)
         return self._mqttc
 
-    async def publish(self, absolute, relative, flow):
+    async def publish(self, absolute, relative, flow, sensor_info):
         # log.info(f'publish: {absolute} {relative} {flow}')
 
         tm = millis() - APP_START_TM
@@ -68,6 +68,7 @@ class Pe32ProxSensPublisher:
             f'{self._prefix}absolute_l={absolute}&'
             f'{self._prefix}relative_l={relative}&'
             f'{self._prefix}flow_mlps={flow}&'
+            f'dbg_sensor={sensor_info}&'
             f'dbg_uptime={tm}&'
             f'dbg_version={__version__}')
 
@@ -85,6 +86,7 @@ class ProximitySensorProcessor:
     MIN_PUBLISH_MS = 300000  # at least once every 5 minutes
 
     def __init__(self, publisher, gauge, liters_per_pulse=1):
+        self._sensor_info = ''
         self._liters = 0
         self._estimated_flow_mlps = None
         self._gauge = gauge
@@ -100,13 +102,19 @@ class ProximitySensorProcessor:
     def ms_since_last_value(self):
         return millis() - self._last_pulse
 
-    def pulse(self, estimated_flow_mlps=None):
+    def pulse(self, estimated_flow_mlps=None, sensor_info=None):
+        if sensor_info is not None:
+            self._sensor_info = sensor_info
+
         self._liters += self._liters_per_pulse
         self._estimated_flow_mlps = estimated_flow_mlps
         self._last_pulse = millis()
         self._update()
 
-    def no_pulse(self):
+    def no_pulse(self, sensor_info=None):
+        if sensor_info is not None:
+            self._sensor_info = sensor_info
+
         self._estimated_flow_mlps = 0
         self._update()
 
@@ -147,7 +155,7 @@ class ProximitySensorProcessor:
             # the publish(). Here we should just poke that publish.
             loop.call_soon(
                 asyncio.create_task, self._publisher.publish(
-                    absolute_liters, relative_liters, flow))
+                    absolute_liters, relative_liters, flow, self._sensor_info))
 
 
 class GpioProximitySensorInterpreter(DigitalPulseInterpreter):
