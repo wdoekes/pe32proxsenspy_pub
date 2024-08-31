@@ -26,6 +26,7 @@ class AnalogCalibrator:
         self._many_values.append(value)
 
         if len(self._many_values) >= 8000:
+            # Only recalibrate during high pulse activity.
             if self._pulses >= 5:
                 self.calibrate()
                 self._reset()
@@ -134,7 +135,7 @@ class AnalogPulseInterpreter:
         dbg_show = False
         dbg_coll = []
         thigh = None
-        expect_next_pulse = None
+        expect_next_pulse = (time() + 60)
 
         while True:
             now = time()
@@ -158,7 +159,10 @@ class AnalogPulseInterpreter:
             if self._parser.high_pulse is True:
                 thigh = time()
                 log.debug(f'got (high) pulse {value} [{sensor_info}]')
-                expect_next_pulse = None
+                # Can't stay high long. But we're not sure how long. Set it to
+                # something decent. If gas user stops using gas during high
+                # peak, we would otherwise not get any pulses anymore.
+                expect_next_pulse = (now + 60)
                 # self.on_pulse()
             elif self._parser.high_pulse is False:
                 # The pulse is on 1 digit of 10, so the duration of one
@@ -188,7 +192,7 @@ class AnalogPulseInterpreter:
                 self.on_pulse(
                     estimated_flow_mlps=flow_mlps, sensor_info=sensor_info)
 
-            if not expect_next_pulse or now >= expect_next_pulse:
+            if now >= expect_next_pulse:
                 self.on_no_pulse(sensor_info=sensor_info)
                 # Send a (no gas usage) pulse every minute.
                 expect_next_pulse = (now + 60)
